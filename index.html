@@ -168,10 +168,18 @@
   // Google Sheetsへの送信に失敗した場合に、参加者PCへCSVバックアップを保存するかどうか
   const DOWNLOAD_CSV_BACKUP_ON_ERROR = true;
 
-  const EXPERIMENT_VERSION = "video-survey-google-sheets-v1";
+  const EXPERIMENT_VERSION = "video-survey-google-sheets-v2-attention-after-q10";
   const clientStartedAt = new Date().toISOString();
+
+  // 2本目の動画アンケートにだけ表示する注意確認項目
+  const ATTENTION_CHECK_ORDER = 2;
+  const ATTENTION_CHECK_NAME = "attention_check_response";
+  const ATTENTION_CHECK_CORRECT_VALUE = 2; // ②ややそう思う
+
   let participantId = "";
   let crowdworksUserId = "";
+  let attentionCheckResponse = "";
+  let attentionCheckPass = "";
 
   const jsPsych = initJsPsych({
     show_progress_bar: true,
@@ -299,6 +307,8 @@
     "q08_journalism_worthy",
     "q09_judgable_from_video",
     "q10_easy_to_understand",
+    "attention_check_response",
+    "attention_check_pass",
     "q11_emotional",
     "q12_prior_exposure",
     "q13_tv_news_natural",
@@ -361,12 +371,34 @@
     `;
   }
 
-  function makeLikertTable() {
+  function makeLikertTable(order) {
     const headerCells = likertOptions
       .map(opt => `<th>${escapeHtml(opt.label)}</th>`)
       .join("");
 
-    const rows = likertItems.map(item => {
+    const attentionCheckItem = {
+      name: ATTENTION_CHECK_NAME,
+      text: "この行では「ややそう思う」を選択してください"
+    };
+
+    // 項目数を直接数えず、q10の項目名を使って直後へ挿入する。
+    const q10Index = likertItems.findIndex(
+      item => item.name === "q10_easy_to_understand"
+    );
+
+    if (q10Index === -1) {
+      throw new Error("q10_easy_to_understand が見つかりません。");
+    }
+
+    const itemsForThisSurvey = order === ATTENTION_CHECK_ORDER
+      ? [
+          ...likertItems.slice(0, q10Index + 1),
+          attentionCheckItem,
+          ...likertItems.slice(q10Index + 1)
+        ]
+      : likertItems;
+
+    const rows = itemsForThisSurvey.map(item => {
       const radioCells = likertOptions.map(opt => `
         <td class="choice-cell">
           <input type="radio" name="${item.name}" value="${opt.value}" required />
@@ -399,10 +431,10 @@
     `;
   }
 
-  function makeSurveyHtml() {
+  function makeSurveyHtml(order) {
     return `
       <div class="question-block">
-        ${makeLikertTable()}
+        ${makeLikertTable(order)}
       </div>
     `;
   }
@@ -481,6 +513,10 @@
           row[column] = EXPERIMENT_VERSION;
         } else if (column === "crowdworks_user_id") {
           row[column] = crowdworksUserId;
+        } else if (column === "attention_check_response") {
+          row[column] = attentionCheckResponse;
+        } else if (column === "attention_check_pass") {
+          row[column] = attentionCheckPass;
         } else if (column === "user_agent") {
           row[column] = navigator.userAgent;
         } else {
@@ -701,7 +737,7 @@
     timeline.push({
       type: jsPsychSurveyHtmlForm,
       preamble: makeSurveyPreamble(order),
-      html: makeSurveyHtml(),
+      html: makeSurveyHtml(order),
       button_label: isLastVideo ? "ユーザーID入力へ" : "次の動画へ",
       data: {
         task: "video_survey",
@@ -716,6 +752,22 @@
         likertItems.forEach(item => {
           data[item.name] = Number(response[item.name]);
         });
+
+        if (order === ATTENTION_CHECK_ORDER) {
+          const rawAttentionResponse = response[ATTENTION_CHECK_NAME];
+
+          if (rawAttentionResponse === undefined || rawAttentionResponse === null || rawAttentionResponse === "") {
+            attentionCheckResponse = "";
+            attentionCheckPass = "";
+          } else {
+            attentionCheckResponse = Number(rawAttentionResponse);
+            attentionCheckPass = attentionCheckResponse === ATTENTION_CHECK_CORRECT_VALUE ? 1 : 0;
+          }
+
+          // jsPsychの2本目の試行データにも記録しておく。
+          data.attention_check_response = attentionCheckResponse;
+          data.attention_check_pass = attentionCheckPass;
+        }
 
         const watch = videoWatchData[video.id] || {};
         data.video_trial_index = watch.video_trial_index ?? "";
