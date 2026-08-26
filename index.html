@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>ニュース動画印象評定</title>
+
+  <!-- jsPsych本体 -->
+  <script src="https://unpkg.com/jspsych@8.2.3"></script>
+
+  <!-- 使用するプラグイン -->
+  <script src="https://unpkg.com/@jspsych/plugin-instructions@2.1.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-preload@2.1.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-video-keyboard-response@2.1.1"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-survey-html-form@2.1.0"></script>
+
+  <!-- jsPsychの標準CSS -->
+  <link href="https://unpkg.com/jspsych@8.2.3/css/jspsych.css" rel="stylesheet" type="text/css" />
+
+  <style>
+    .video-start-panel {
+      text-align: center;
+      margin-top: 18px;
+      margin-bottom: 18px;
+    }
+
+    .video-start-button {
+      font-size: 1.05rem;
+      font-weight: 700;
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .video-start-button:disabled {
+      cursor: default;
+      opacity: 0.7;
+    }
+    body {
+      background: #fafafa;
+      color: #222;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .jspsych-content {
+      max-width: 1100px;
+    }
+
+    .trial-count {
+      font-size: 0.95rem;
+      color: #555;
+      margin-bottom: 8px;
+      text-align: left;
+    }
+
+    .video-note,
+    .question-block {
+      text-align: left;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin-bottom: 22px;
+      line-height: 1.8;
+    }
+
+    .question-title {
+      font-weight: 700;
+      margin-bottom: 12px;
+      line-height: 1.8;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .likert-table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 980px;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .likert-table th,
+    .likert-table td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      vertical-align: middle;
+    }
+
+    .likert-table th {
+      background: #f3f3f3;
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .likert-table td.statement {
+      width: 38%;
+      text-align: left;
+      line-height: 1.6;
+    }
+
+    .likert-table td.choice-cell {
+      text-align: center;
+      width: 8.8%;
+    }
+
+    .note {
+      font-size: 0.9rem;
+      color: #666;
+      margin-top: 8px;
+    }
+
+    .end-screen {
+      max-width: 760px;
+      margin: 9vh auto;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 28px 32px;
+      line-height: 1.8;
+      box-shadow: 0 1px 8px rgba(0, 0, 0, 0.07);
+    }
+
+    .end-screen h1 {
+      font-size: 1.45rem;
+      margin: 0 0 12px 0;
+    }
+
+    .user-id-steps {
+      margin: 10px 0 18px 1.4em;
+      padding-left: 0.8em;
+    }
+
+    .user-id-steps li {
+      margin-bottom: 6px;
+    }
+
+    .user-id-input {
+      display: block;
+      width: min(100%, 360px);
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 11px 12px;
+      border: 1px solid #bbb;
+      border-radius: 7px;
+      font-size: 1rem;
+    }
+  </style>
+</head>
+
+<body></body>
+
+<script>
+  // =========================================================
+  // 0. 基本設定
+  // =========================================================
+
+  // Apps Scriptで発行した「ウェブアプリURL」をここに貼り付けてください。
+  // 例: https://script.google.com/macros/s/xxxxxxxxxxxxxxxxxxxxxxxxxxxx/exec
+  const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxw6SVusQbAQz1dMNsr52qDJfWz_3pTfQLAiZ5jX11IVOFvo9yQJzdzmfyY9mgL2Jzx/exec";
+
+  // Google Sheetsへの送信に失敗した場合に、参加者PCへCSVバックアップを保存するかどうか
+  const DOWNLOAD_CSV_BACKUP_ON_ERROR = true;
+
+  const EXPERIMENT_VERSION = "video-survey-google-sheets-v1";
+  const clientStartedAt = new Date().toISOString();
+  let participantId = "";
+  let crowdworksUserId = "";
+
+  const jsPsych = initJsPsych({
+    show_progress_bar: true,
+    auto_update_progress_bar: true,
+    on_finish: async function() {
+      const rows = prepareRowsForSaving();
+
+      renderEndMessage(
+        "回答を送信しています",
+        "この画面を閉じずに、そのままお待ちください。"
+        );
+
+      try {
+        await sendRowsToGoogleSheet(rows);
+
+        renderEndMessage(
+          "回答を送信しました",
+          "ご協力ありがとうございました。以下の事後説明をご確認ください。",
+          makeDebriefHtml()
+        );
+      } catch (error) {
+        console.error(error);
+
+        if (DOWNLOAD_CSV_BACKUP_ON_ERROR) {
+          downloadCsvWithUtf8Bom(rows, `video_survey_backup_${participantId}.csv`);
+        }
+
+        renderEndMessage(
+          "送信を完了できませんでした",
+          "Googleスプレッドシートへの送信設定を確認してください。バックアップCSVを有効にしている場合は、このPCにCSVが保存されます。",
+          `<p><strong>エラー:</strong> ${escapeHtml(error.message || String(error))}</p>`
+        );
+      }
+    }
+  });
+
+  participantId = jsPsych.randomization.randomID(10);
+
+  // =========================================================
+  // 1. 9本の動画を定義
+  //    file の値は、実際の動画ファイル名に合わせてください。
+  // =========================================================
+
+  const allVideos = [
+    { id: "news01", label: "news01", file: "videos/gaikokuijin.mp4" },
+    { id: "news02", label: "news02", file: "videos/hatarakikata.mp4" },
+    { id: "news03", label: "news03", file: "videos/intelligence.mp4" },
+    { id: "news04", label: "news04", file: "videos/kenpou.mp4" },
+    { id: "news05", label: "news05", file: "videos/kokki.mp4" },
+    { id: "news06", label: "news06", file: "videos/kyuhu.mp4" },
+    { id: "news07", label: "news07", file: "videos/nichibei.mp4" },
+    { id: "news08", label: "news08", file: "videos/taxcut.mp4" },
+    { id: "news09", label: "news09", file: "videos/weapon.mp4" }
+  ];
+
+  // 9本から2本をランダム抽出
+  const sampledVideos = jsPsych.randomization.sampleWithoutReplacement(allVideos, 2);
+
+  // 参加者全体に付与する共通データ
+  jsPsych.data.addProperties({
+    participant_id: participantId,
+    selected_video_ids: sampledVideos.map(v => v.id).join("|"),
+    selected_video_files: sampledVideos.map(v => v.file).join("|")
+  });
+
+  // 動画視聴トライアルの情報を、直後のアンケート行に入れるための一時保存
+  const videoWatchData = {};
+
+  // =========================================================
+  // 2. アンケート項目
+  // =========================================================
+
+  const likertItems = [
+    { name: "q01_biased", text: "この報道は偏っていると思う" },
+    { name: "q02_unfair", text: "この報道は公正さを欠いていると思う" },
+    { name: "q03_sufficient_info", text: "この報道は判断に必要な情報を十分に伝えていたと思う" },
+    { name: "q04_sufficient_context", text: "この報道は必要な背景や文脈を十分に示していたと思う" },
+    { name: "q05_news_appropriate", text: "この報道は、ニュース報道として適切だと思う" },
+    { name: "q06_public_issue_suitable", text: "この報道は、公共的な問題を伝える報道としてふさわしいと思う" },
+    { name: "q07_journalistic_role", text: "この報道は、ジャーナリズムが果たすべき役割を果たしていると思う" },
+    { name: "q08_journalism_worthy", text: "この報道は、ジャーナリズムとして認めるに値すると思う" },
+    { name: "q09_judgable_from_video", text: "この動画だけでも、この報道の伝え方をある程度判断できたと思う" },
+    { name: "q10_easy_to_understand", text: "この動画は何を伝えようとしているのか分かりやすかった" },
+    { name: "q11_emotional", text: "この動画は感情を強く揺さぶる内容だった" },
+    { name: "q12_prior_exposure", text: "この話題を以前に見聞きしたことがあった" },
+    { name: "q13_tv_news_natural", text: "この動画は、テレビ局のニュース解説動画として見ても不自然ではない" },
+    { name: "q14_ai_unnatural", text: "この動画はAIで作られたような不自然さが気になった" },
+    { name: "q15_lack_other_views_comment_natural", text: "この動画に「別の見方が十分に示されていない」というコメントが付いても不自然ではない" },
+    { name: "q16_lack_context_comment_natural", text: "この動画に「背景や文脈の説明が足りない」というコメントが付いても不自然ではない" }
+  ];
+
+  const likertOptions = [
+    { value: "1", label: "①そう思う" },
+    { value: "2", label: "②ややそう思う" },
+    { value: "3", label: "③どちらかといえばそう思う" },
+    { value: "4", label: "④どちらともいえない" },
+    { value: "5", label: "⑤どちらかといえばそう思わない" },
+    { value: "6", label: "⑥あまり思わない" },
+    { value: "7", label: "⑦そう思わない" }
+  ];
+
+  // Apps Script側のHEADERSと同じ順番にしてください。
+  const dataColumns = [
+    "server_received_at",
+    "client_started_at",
+    "client_submitted_at",
+    "experiment_version",
+    "participant_id",
+    "crowdworks_user_id",
+    "selected_video_ids",
+    "selected_video_files",
+    "presentation_order",
+    "video_id",
+    "video_label",
+    "video_file",
+    "video_trial_index",
+    "video_time_elapsed_at_end",
+    "q01_biased",
+    "q02_unfair",
+    "q03_sufficient_info",
+    "q04_sufficient_context",
+    "q05_news_appropriate",
+    "q06_public_issue_suitable",
+    "q07_journalistic_role",
+    "q08_journalism_worthy",
+    "q09_judgable_from_video",
+    "q10_easy_to_understand",
+    "q11_emotional",
+    "q12_prior_exposure",
+    "q13_tv_news_natural",
+    "q14_ai_unnatural",
+    "q15_lack_other_views_comment_natural",
+    "q16_lack_context_comment_natural",
+    "rt",
+    "time_elapsed",
+    "trial_index",
+    "user_agent"
+  ];
+
+  // =========================================================
+  // 3. 便利関数
+  // =========================================================
+
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function makeVideoInstructionPreamble(order) {
+    return `
+      <div class="trial-count">動画 ${order} / ${sampledVideos.length}</div>
+
+      <div class="video-note">
+        <p>これからニュース動画をご覧いただきます。</p>
+        <p>準備ができたら、下の「動画を視聴」ボタンを押してください。</p>
+        <p>動画が終了すると、自動的にアンケート画面へ進みます。</p>
+      </div>
+
+      <div id="video-start-panel" class="video-start-panel">
+        <button id="start-video-button" class="video-start-button" type="button">
+          動画を視聴
+        </button>
+        <div id="video-play-error" class="note"></div>
+      </div>
+    `;
+  }
+
+  function makeSurveyPreamble(order) {
+    return `
+      <div class="trial-count">アンケート ${order} / ${sampledVideos.length}</div>
+
+      <div class="question-block">
+        <div class="question-title">
+          このニュース動画をご覧になったうえで、以下の項目について、あなたの印象として最も近いものをお答えください。
+        </div>
+        <p>
+          正解・不正解はありません。動画そのものについて感じたことをお答えください。
+          動画の技術的な出来栄えや制作手法そのものではなく、
+          この動画がニュース報道としてどのように見えるか、
+          また伝え方をどのように受け取るかについてお答えください。
+        </p>
+      </div>
+    `;
+  }
+
+  function makeLikertTable() {
+    const headerCells = likertOptions
+      .map(opt => `<th>${escapeHtml(opt.label)}</th>`)
+      .join("");
+
+    const rows = likertItems.map(item => {
+      const radioCells = likertOptions.map(opt => `
+        <td class="choice-cell">
+          <input type="radio" name="${item.name}" value="${opt.value}" required />
+        </td>
+      `).join("");
+
+      return `
+        <tr>
+          <td class="statement">${escapeHtml(item.text)}</td>
+          ${radioCells}
+        </tr>
+      `;
+    }).join("");
+
+    return `
+      <div class="table-wrap">
+        <table class="likert-table">
+          <thead>
+            <tr>
+              <th>項目</th>
+              ${headerCells}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+      <div class="note">横に長い場合は、表を左右にスクロールできます。</div>
+    `;
+  }
+
+  function makeSurveyHtml() {
+    return `
+      <div class="question-block">
+        ${makeLikertTable()}
+      </div>
+    `;
+  }
+
+  function makeUserIdHtml() {
+    return `
+      <div class="question-block">
+        <div class="question-title">あなたのユーザーIDを教えてください。</div>
+
+        <p>ユーザーIDは、自分のプロフィールページで確認できます。</p>
+        <ol class="user-id-steps">
+          <li>右上にある自分の名前をクリックします。</li>
+          <li>プルダウンメニューから「自分の公開ページを確認」をクリックします。</li>
+          <li>表示された公開ページのアドレスにある数字がユーザーIDです。</li>
+        </ol>
+
+        <label for="crowdworks-user-id"><strong>ユーザーID</strong></label>
+        <input
+          id="crowdworks-user-id"
+          class="user-id-input"
+          name="crowdworks_user_id"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9０-９]+"
+          autocomplete="off"
+          required
+        />
+        <div class="note">数字のみ入力してください。</div>
+      </div>
+    `;
+  }
+
+  function makeDebriefHtml() {
+    return `
+      <div class="question-block">
+        <h2>事後説明</h2>
+        <p>本研究にご参加いただき、誠にありがとうございました。</p>
+        <p>
+          この調査で用いた動画は生成AI NoLang（no-lang.com）を用いて作成しました。
+        </p>
+        <p>
+          もし本研究についてご不明な点やご質問がある場合は、
+          クラウドワークスのメッセージ機能を通じて研究代表者までお問い合わせください。
+        </p>
+      </div>
+    `;
+  }
+
+  function isGoogleScriptUrlConfigured() {
+    return GOOGLE_SCRIPT_URL.startsWith("https://script.google.com/macros/s/") &&
+      GOOGLE_SCRIPT_URL.endsWith("/exec") &&
+      !GOOGLE_SCRIPT_URL.includes("PASTE_YOUR");
+  }
+
+  function normalizeValue(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "object") return JSON.stringify(value);
+    return value;
+  }
+
+  function prepareRowsForSaving() {
+    const submittedAt = new Date().toISOString();
+    const trials = jsPsych.data.get().filter({ task: "video_survey" }).values();
+
+    return trials.map(trial => {
+      const row = {};
+
+      dataColumns.forEach(column => {
+        if (column === "server_received_at") {
+          row[column] = "";
+        } else if (column === "client_started_at") {
+          row[column] = clientStartedAt;
+        } else if (column === "client_submitted_at") {
+          row[column] = submittedAt;
+        } else if (column === "experiment_version") {
+          row[column] = EXPERIMENT_VERSION;
+        } else if (column === "crowdworks_user_id") {
+          row[column] = crowdworksUserId;
+        } else if (column === "user_agent") {
+          row[column] = navigator.userAgent;
+        } else {
+          row[column] = normalizeValue(trial[column]);
+        }
+      });
+
+      return row;
+    });
+  }
+
+  async function sendRowsToGoogleSheet(rows) {
+    if (!isGoogleScriptUrlConfigured()) {
+      throw new Error("GOOGLE_SCRIPT_URLが未設定です。Apps ScriptのウェブアプリURL（/execで終わるURL）をindex.htmlに貼り付けてください。");
+    }
+
+    const payload = JSON.stringify({
+      experiment_version: EXPERIMENT_VERSION,
+      participant_id: participantId,
+      rows: rows
+    });
+
+    await sendRowsWithHiddenForm(payload);
+  }
+
+  function sendRowsWithHiddenForm(payload) {
+    return new Promise((resolve, reject) => {
+      try {
+        const frameName = `gas_hidden_frame_${participantId}`;
+
+        const iframe = document.createElement("iframe");
+        iframe.name = frameName;
+        iframe.style.display = "none";
+
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = GOOGLE_SCRIPT_URL;
+        form.target = frameName;
+        form.style.display = "none";
+
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = "payload";
+        input.value = payload;
+
+        form.appendChild(input);
+        document.body.appendChild(iframe);
+        document.body.appendChild(form);
+
+        iframe.addEventListener("load", () => {
+          setTimeout(() => {
+            iframe.remove();
+            form.remove();
+            resolve();
+          }, 500);
+        }, { once: true });
+
+        form.submit();
+
+        // iframeのloadが取れない環境でも止まらないようにする保険
+        setTimeout(resolve, 3000);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function downloadCsvWithUtf8Bom(rows, filename) {
+    const csv = makeCsv(rows, dataColumns);
+    const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function makeCsv(rows, columns) {
+    const header = columns.map(escapeCsvCell).join(",");
+    const body = rows
+      .map(row => columns.map(column => escapeCsvCell(row[column])).join(","))
+      .join("\r\n");
+
+    return `${header}\r\n${body}`;
+  }
+
+  function escapeCsvCell(value) {
+    const text = value === null || value === undefined ? "" : String(value);
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+
+  function renderEndMessage(title, message, extraHtml = "") {
+    document.body.innerHTML = `
+      <main class="end-screen">
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(message)}</p>
+        ${extraHtml}
+      </main>
+    `;
+  }
+
+  // =========================================================
+  // 4. タイムライン作成
+  // =========================================================
+
+  const timeline = [];
+
+  // 4-1. 開始説明
+  timeline.push({
+    type: jsPsychInstructions,
+    pages: [
+      `
+      <div class="question-block">
+        <p>これから、ニュース動画を2本ご覧いただきます。</p>
+        <p>各動画を見終わった後、その動画についてのアンケートにお答えください。</p>
+      </div>
+      `
+    ],
+    show_clickable_nav: true,
+    allow_backward: false,
+    button_label_next: "開始",
+    record_data: false
+  });
+
+  // 4-2. 選ばれた2本だけをプリロード
+  timeline.push({
+    type: jsPsychPreload,
+    video: sampledVideos.map(v => v.file),
+    message: "動画を読み込んでいます。しばらくお待ちください。",
+    show_progress_bar: true,
+    show_detailed_errors: true,
+    continue_after_error: false,
+    max_load_time: 120000
+  });
+
+  // 4-3. 動画1 → アンケート1 → 動画2 → アンケート2
+  sampledVideos.forEach((video, index) => {
+    const order = index + 1;
+    const isLastVideo = order === sampledVideos.length;
+
+    // 動画提示
+    timeline.push({
+      type: jsPsychVideoKeyboardResponse,
+      stimulus: [video.file],
+      choices: "NO_KEYS",
+      trial_ends_after_video: true,
+
+    // ここを false にする
+      autoplay: false,
+
+    // 参加者に一時停止やシークをさせたくない場合は false のまま
+      controls: false,
+
+      width: 900,
+      prompt: makeVideoInstructionPreamble(order),
+
+      data: {
+        task: "video_watch",
+        presentation_order: order,
+        video_id: video.id,
+        video_label: video.label,
+        video_file: video.file
+      },
+
+      on_load: function() {
+        const videoElement =
+          document.querySelector("#jspsych-video-keyboard-response-stimulus") ||
+          document.querySelector("video");
+
+        const startButton = document.getElementById("start-video-button");
+        const startPanel = document.getElementById("video-start-panel");
+        const errorMessage = document.getElementById("video-play-error");
+
+        if (!videoElement || !startButton) {
+          return;
+        }
+
+        videoElement.pause();
+        videoElement.currentTime = 0;
+
+        startButton.addEventListener("click", async function() {
+          startButton.disabled = true;
+          startButton.textContent = "再生中";
+
+          try {
+            await videoElement.play();
+
+            if (startPanel) {
+              startPanel.remove();
+            }
+          } catch (error) {
+            console.error(error);
+
+            startButton.disabled = false;
+            startButton.textContent = "動画を視聴";
+
+            if (errorMessage) {
+              errorMessage.textContent = "動画を再生できませんでした。もう一度「動画を視聴」ボタンを押してください。";
+            }
+          }
+        });
+  },
+
+  on_finish: function(data) {
+    videoWatchData[video.id] = {
+      video_trial_index: data.trial_index,
+      video_time_elapsed_at_end: data.time_elapsed
+    };
+  }
+});
+
+    // 動画直後のアンケート
+    timeline.push({
+      type: jsPsychSurveyHtmlForm,
+      preamble: makeSurveyPreamble(order),
+      html: makeSurveyHtml(),
+      button_label: isLastVideo ? "ユーザーID入力へ" : "次の動画へ",
+      data: {
+        task: "video_survey",
+        presentation_order: order,
+        video_id: video.id,
+        video_label: video.label,
+        video_file: video.file
+      },
+      on_finish: function(data) {
+        const response = data.response;
+
+        likertItems.forEach(item => {
+          data[item.name] = Number(response[item.name]);
+        });
+
+        const watch = videoWatchData[video.id] || {};
+        data.video_trial_index = watch.video_trial_index ?? "";
+        data.video_time_elapsed_at_end = watch.video_time_elapsed_at_end ?? "";
+      }
+    });
+  });
+
+  // 4-4. すべての動画アンケートの後に、ユーザーIDを1回だけ尋ねる
+  timeline.push({
+    type: jsPsychSurveyHtmlForm,
+    html: makeUserIdHtml(),
+    button_label: "回答を送信",
+    data: {
+      task: "user_id_survey"
+    },
+    on_finish: function(data) {
+      const enteredUserId = String(data.response.crowdworks_user_id || "").trim();
+
+      // 全角数字で入力された場合も、保存時は半角数字にそろえる
+      crowdworksUserId = enteredUserId.replace(/[０-９]/g, character =>
+        String.fromCharCode(character.charCodeAt(0) - 0xFEE0)
+      );
+    }
+  });
+
+  jsPsych.run(timeline);
+</script>
+</html>
