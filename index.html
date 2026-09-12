@@ -66,6 +66,42 @@
       line-height: 1.8;
     }
 
+    /* 動画ページで情報の基準時点を目立たせる案内 */
+    .video-info-notice {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto 22px;
+      padding: 20px 24px;
+      border: 2px solid #d97706;
+      border-left: 8px solid #d97706;
+      border-radius: 10px;
+      background: #fff8e1;
+      color: #5c3500;
+      text-align: left;
+      line-height: 1.8;
+      box-shadow: 0 3px 10px rgba(120, 75, 0, 0.10);
+      overflow-wrap: anywhere;
+    }
+
+    .video-info-notice-title {
+      margin: 0 0 8px;
+      font-size: 1.15rem;
+      font-weight: 800;
+    }
+
+    .video-info-notice-text {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    @media (max-width: 600px) {
+      .video-info-notice {
+        padding: 16px;
+      }
+    }
+
     .question-title {
       font-weight: 700;
       margin-bottom: 12px;
@@ -337,6 +373,11 @@
   function makeVideoInstructionPreamble(order) {
     return `
       <div class="trial-count">動画 ${order} / ${sampledVideos.length}</div>
+
+      <aside id="video-info-notice" class="video-info-notice" aria-labelledby="video-info-notice-title">
+        <h2 id="video-info-notice-title" class="video-info-notice-title">動画の情報時点について</h2>
+        <p class="video-info-notice-text">この動画は、2026年５月時点で公表されていた情報を元に作成したものですので、古く感じられるかもしれませんが、その点は気にしないでください。</p>
+      </aside>
 
       <div class="video-note">
         <p>これからニュース動画をご覧いただきます。</p>
@@ -694,6 +735,12 @@
         const startButton = document.getElementById("start-video-button");
         const startPanel = document.getElementById("video-start-panel");
         const errorMessage = document.getElementById("video-play-error");
+
+        // 案内を動画の直前に配置し、再生開始後も表示しておく。
+        const videoInfoNotice = document.getElementById("video-info-notice");
+        if (videoElement && videoInfoNotice) {
+          videoElement.before(videoInfoNotice);
+        }
 
         if (!videoElement || !startButton) {
           return;
